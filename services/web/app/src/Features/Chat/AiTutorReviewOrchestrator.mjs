@@ -1261,7 +1261,7 @@ const SEVERITY_RANK = { critical: 3, warning: 2, suggestion: 1 }
  *
  * This removes redundancy while preserving diverse feedback.
  */
-function deduplicateComments(comments, mergedTex)
+export function deduplicateComments(comments, mergedTex)
 {
   if (comments.length <= 1) return comments
 
