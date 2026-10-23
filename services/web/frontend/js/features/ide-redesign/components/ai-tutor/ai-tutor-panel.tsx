@@ -9,6 +9,10 @@ import {
   runFullReview,
   runCitationCheck,
   deleteAiTutorComments,
+  recordAppliedThreads,
+  shouldApply,
+  formatRevisionLine,
+  AppliedThread,
   WholeProjectMetadata,
   ReviewResult,
   ReviewComment,
@@ -50,6 +54,7 @@ interface CommentQueue {
   currentIndex: number
   totalApplied: number
   totalSkipped: number
+  recordThreads: boolean
 }
 
 export default function AiTutorPanel() {
@@ -115,6 +120,7 @@ export default function AiTutorPanel() {
     const applyBatch = async () => {
       let applied = 0
       let skipped = 0
+      const created: AppliedThread[] = []
 
       for (const comment of entry.comments) {
         // Re-fetch snapshot for each comment to account for position shifts
@@ -151,11 +157,25 @@ export default function AiTutorPanel() {
             t: threadId,
           }
           currentDocument.submitOp(op)
+          created.push({
+            threadId,
+            comment: comment.comment,
+            highlightText: comment.highlightText,
+            docPath: entry.docPath,
+            agentName: comment.agentName,
+            severity: comment.severity,
+          })
           applied++
         } catch (err) {
           console.warn('[AI Tutor] Failed to apply comment:', err)
           skipped++
         }
+      }
+
+      if (queue.recordThreads && created.length > 0) {
+        await recordAppliedThreads(projectId, created).catch(err =>
+          console.warn('[AI Tutor] Failed to record applied threads:', err)
+        )
       }
 
       queue.totalApplied += applied
@@ -284,7 +304,10 @@ export default function AiTutorPanel() {
           : ''
       setSuccessMessage(
         `Review complete! ${r.summary.total} comments from ${Object.keys(r.summary.byCategory).length} reviewers.` +
-        ` Paper type: ${r.classification.paperType}.${failedNote}`
+        ` Paper type: ${r.classification.paperType}.${failedNote}` +
+        (r.summary.revision
+          ? ` ${formatRevisionLine(r.summary.revision)}.`
+          : '')
       )
     } catch (err) {
       console.error('[AI Tutor] Full review error:', err)
@@ -365,8 +388,9 @@ export default function AiTutorPanel() {
     const entries: CommentQueue['entries'] = []
     for (const [docPath, comments] of Object.entries(reviewResult.commentsByDoc)) {
       const docId = docPathToId[docPath]
-      if (docId && (comments as ReviewComment[]).length > 0) {
-        entries.push({ docPath, docId, comments: comments as ReviewComment[] })
+      const applicable = (comments as ReviewComment[]).filter(shouldApply)
+      if (docId && applicable.length > 0) {
+        entries.push({ docPath, docId, comments: applicable })
       }
     }
 
@@ -381,6 +405,7 @@ export default function AiTutorPanel() {
       currentIndex: 0,
       totalApplied: 0,
       totalSkipped: 0,
+      recordThreads: Boolean(reviewResult.summary.revision),
     }
 
     setIsApplying(true)
@@ -432,6 +457,16 @@ export default function AiTutorPanel() {
   // Helper to extract metadata from review result
   const projectMetadata: WholeProjectMetadata | undefined =
     reviewResult?.metadata
+
+  const applicableCount = reviewResult
+    ? Object.entries(reviewResult.commentsByDoc).reduce(
+        (n, [docPath, comments]) =>
+          reviewResult.docPathToId?.[docPath]
+            ? n + comments.filter(shouldApply).length
+            : n,
+        0
+      )
+    : 0
 
   return (
     <div className="ai-tutor-panel" style={{ color: 'var(--content-primary-themed)' }}>
@@ -699,8 +734,13 @@ export default function AiTutorPanel() {
               >
                 {isApplying
                   ? 'Applying comments...'
-                  : `Apply ${reviewResult.summary.total} Comments to All Files`}
+                  : `Apply ${applicableCount} Comments to All Files`}
               </OLButton>
+              {reviewResult.summary.revision && (
+                <p style={{ fontSize: '12px', margin: '0 0 6px 0' }}>
+                  {formatRevisionLine(reviewResult.summary.revision)}
+                </p>
+              )}
               {applyProgress && (
                 <div
                   style={{

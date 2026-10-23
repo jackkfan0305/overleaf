@@ -36,6 +36,32 @@ export interface ReviewComment {
   docPath: string
   startOffset: number
   endOffset: number
+  revisionLabel?: 'new' | 'still_open' | 'dismissed'
+}
+
+export type ReviewRevisionCounts = {
+  new: number
+  still_open: number
+  dismissed: number
+  fixed: number
+}
+
+export type AppliedThread = {
+  threadId: string
+  comment: string
+  highlightText: string
+  docPath: string
+  agentName: string
+  severity: string
+}
+
+export function shouldApply(c: ReviewComment): boolean {
+  return c.revisionLabel !== 'still_open' && c.revisionLabel !== 'dismissed'
+}
+
+export function formatRevisionLine(r: ReviewRevisionCounts): string {
+  const base = `${r.new} new · ${r.still_open} still open · ${r.fixed} fixed since last review`
+  return r.dismissed > 0 ? `${base} · ${r.dismissed} dismissed` : base
 }
 
 export interface ReviewResult {
@@ -52,6 +78,7 @@ export interface ReviewResult {
     total: number
     byCategory: Record<string, number>
     bySeverity: Record<string, number>
+    revision?: ReviewRevisionCounts
   }
   failedAgents: Array<{ id: string; name: string; reason: string }>
   roleModelPapers?: string[]
@@ -92,6 +119,15 @@ export async function deleteAiTutorComments(
   return (await postJSON(
     `/project/${projectId}/ai-tutor-delete-comments`
   )) as { deleted: number }
+}
+
+export async function recordAppliedThreads(
+  projectId: string,
+  threads: AppliedThread[]
+): Promise<void> {
+  await postJSON(`/project/${projectId}/ai-tutor-applied-threads`, {
+    body: { threads },
+  })
 }
 
 export interface CitationCheckStats {
