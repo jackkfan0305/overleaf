@@ -1038,6 +1038,8 @@ export const SUBAGENT_DEFS = [
       'Flag results tables or figures, new numbers or metrics not reported elsewhere, experimental setup details, extra analysis, and contribution claims. ' +
       'Set highlightText to the exact offending text (for example the first row of the table, or the sentence with the numbers). ' +
       'State why it is a risk and name the target section (Results, Method, or Appendix). Use severity "critical". ' +
+      'You cannot see the Results section, so you cannot tell whether a number is new. Flag a number only when the text presents it as an additional or new result (for example "we additionally show", a new dataset, or a table). ' +
+      'A number used to qualify a headline result (for example "Although our model reaches X, it still trails humans") is a brief mention of an existing result: do not flag it. When unsure, do not flag. ' +
       'If the section is clean, leave no scope comment: admitted limitations, scope statements, future work, and numbers that restate a main-body result are clean.',
   },
   {
