@@ -1033,7 +1033,12 @@ export const SUBAGENT_DEFS = [
     guidanceKey: null,
     textOnly: true,
     systemPreamble:
-      'Review conclusion for brevity (not repeating abstract), limitations coverage, ethical considerations, and future work.',
+      'Review conclusion for brevity (not repeating abstract), limitations coverage, ethical considerations, and future work.\n' +
+      'Also check the Limitations section only (not Conclusion or Ethics) against the "Scope Rule: Keep Main-Paper Content Out of Limitations" section of the limitations skill. ' +
+      'Flag results tables or figures, new numbers or metrics not reported elsewhere, experimental setup details, extra analysis, and contribution claims. ' +
+      'Set highlightText to the exact offending text (for example the first row of the table, or the sentence with the numbers). ' +
+      'State why it is a risk and name the target section (Results, Method, or Appendix). Use severity "critical". ' +
+      'If the section is clean, leave no scope comment: admitted limitations, scope statements, future work, and numbers that restate a main-body result are clean.',
   },
   {
     id: 'appendix',
@@ -2128,6 +2133,22 @@ export function mapCommentsToDocuments(
 // ---------------------------------------------------------------------------
 
 /**
+ * Append a target-venue line to the conclusion reviewer's preamble.
+ * Returns a new array; SUBAGENT_DEFS and non-conclusion defs are not copied or mutated.
+ */
+export function withConclusionVenue(defs, venue) {
+  const isArr = /^(acl|emnlp|naacl|eacl)(_|$)/.test(venue ?? '')
+  const line = isArr
+    ? `Target venue: ${venue} (ACL Rolling Review). In Limitations scope comments, say ARR can desk-reject papers that put main-paper content in Limitations.`
+    : `Target venue: ${venue}. In Limitations scope comments, say the content dodges the page limit and belongs in the main paper or appendix. Do not mention desk rejection.`
+  return defs.map(d =>
+    d.id === 'conclusion'
+      ? { ...d, systemPreamble: d.systemPreamble + '\n' + line }
+      : d
+  )
+}
+
+/**
  * Run the full multi-agent paper review.
  *
  * @param {object} opts
@@ -2209,13 +2230,16 @@ export async function runFullReview({
 
   // Build the final list of agents: static defs + dynamic paper-type agent
   // Filter out disabled agents from env config
-  const agentDefs = SUBAGENT_DEFS.filter(d => {
-    if (DISABLED_AGENTS.has(d.id)) {
-      console.log(`[AI Tutor] Agent "${d.name}" (${d.id}) disabled via AI_TUTOR_DISABLED_AGENTS`)
-      return false
-    }
-    return true
-  })
+  const agentDefs = withConclusionVenue(
+    SUBAGENT_DEFS.filter(d => {
+      if (DISABLED_AGENTS.has(d.id)) {
+        console.log(`[AI Tutor] Agent "${d.name}" (${d.id}) disabled via AI_TUTOR_DISABLED_AGENTS`)
+        return false
+      }
+      return true
+    }),
+    venue
+  )
 
   // Add a paper-type-specific reviewer if a guideline file exists for this type
   const paperTypeFile = `03_paper_types/${classification.paperType}_paper.md`
