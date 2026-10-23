@@ -82,13 +82,31 @@ if (fs.existsSync(CACHE_DIR)) {
     } catch {
       continue
     }
+    const all = []
     const kept = []
     for (const list of Object.values(review.commentsByDoc || {})) {
       for (const c of list) {
         if (typeof c.comment !== 'string') continue
+        all.push(c)
         const key = comparisonKey(c.comment)
         if (kept.every(o => diceCoefficient(key, comparisonKey(o.comment)) < 0.4)) kept.push(c)
       }
+    }
+    if (all.length >= 10) {
+      check(`distinct comments stay new: ${id}`, () => {
+        const half = Math.floor(all.length / 2)
+        const prior = all.slice(0, half).map((c, i) => ({
+          threadId: 'p' + i, comment: c.comment, status: 'open',
+          docPath: c.docPath, highlightText: c.highlightText,
+        }))
+        const next = all.slice(half)
+        // Located priors: only comments on the same spot can match.
+        const located = labelComments(next, prior)
+        assert.ok(located.counts.new >= next.length * 0.8, JSON.stringify(located.counts))
+        // Unlocated priors (pre-feature threads): high text bar only.
+        const bare = labelComments(next, prior.map(({ docPath, highlightText, ...t }) => t))
+        assert.ok(bare.counts.new >= next.length * 0.8, JSON.stringify(bare.counts))
+      })
     }
     if (kept.length < 6) {
       console.log(`SKIP ${id}: only ${kept.length} distinct comments`)
@@ -138,6 +156,19 @@ check('best match wins', () => {
     { threadId: 'res', comment: '[warning] [Clarity] ' + body + ' Extra words appended here.', status: 'resolved' },
   ])
   assert.equal(b.comments[0].revisionLabel, 'still_open')
+})
+
+check('same text at a different location stays new', () => {
+  const body = 'The acronym GRPO is used in the introduction but never defined.'
+  const prior = [{
+    threadId: 't', comment: '[warning] [Clarity] ' + body, status: 'open',
+    docPath: 'other.tex', highlightText: 'GRPO',
+  }]
+  const out = labelComments([{ ...mk('[warning] [Clarity] ' + body), highlightText: 'GRPO' }], prior)
+  assert.equal(out.comments[0].revisionLabel, 'new')
+  prior[0].docPath = 'main.tex'
+  const same = labelComments([{ ...mk('[warning] [Clarity] ' + body), highlightText: 'GRPO' }], prior)
+  assert.equal(same.comments[0].revisionLabel, 'still_open')
 })
 
 check('buildPriorThreads', () => {

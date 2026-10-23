@@ -11,6 +11,9 @@ import path from 'node:path'
 
 export const AI_TUTOR_THREAD_RE = /^\[(AI Tutor|critical|warning|suggestion)\]/
 export const REVISION_MATCH_THRESHOLD = 0.4
+// Prior threads with no recorded location (made before applied_threads.json) are
+// matched on text alone, which needs a much higher bar than the located case.
+export const UNLOCATED_MATCH_THRESHOLD = 0.7
 
 const PREFIX_RE = /^(\[AI Tutor\]\s*)?\[(critical|warning|suggestion)\]\s*\[[^\]]*\]\s*/i
 const AGENT_TAG_RE = /^(?:\[AI Tutor\]\s*)?\[(?:critical|warning|suggestion)\]\s*\[([^\]]*)\]/
@@ -62,8 +65,15 @@ export function comparisonKey(text)
   return normalizeWhitespace(text.replace(PREFIX_RE, '').toLowerCase())
 }
 
-// ponytail: compares comment text only, so short generic comments can collide.
-// Add a highlight-text check if false matches show up.
+function sameLocation(c, t)
+{
+  if (c.docPath !== t.docPath) return false
+  const a = normalizeWhitespace(c.highlightText || '').toLowerCase()
+  const b = normalizeWhitespace(t.highlightText || '').toLowerCase()
+  if (!a || !b) return false
+  return a.includes(b) || b.includes(a) || diceCoefficient(a, b) >= 0.5
+}
+
 export function labelComments(comments, priorThreads)
 {
   const priorKeys = priorThreads.map(t => comparisonKey(t.comment))
@@ -77,8 +87,12 @@ export function labelComments(comments, priorThreads)
     let bestScore = 0
     priorKeys.forEach((pk, i) =>
     {
+      const t = priorThreads[i]
+      const located = Boolean(t.docPath && t.highlightText)
+      if (located && !sameLocation(c, t)) return
       const score = diceCoefficient(key, pk)
-      if (score >= REVISION_MATCH_THRESHOLD && score > bestScore)
+      const min = located ? REVISION_MATCH_THRESHOLD : UNLOCATED_MATCH_THRESHOLD
+      if (score >= min && score > bestScore)
       {
         best = i
         bestScore = score
@@ -118,12 +132,23 @@ export function buildPriorThreads(threads, appliedThreads)
   {
     const content = t?.messages?.[0]?.content
     if (!isTutorComment(content)) continue
-    out.push({ threadId, comment: content, status: t.resolved ? 'resolved' : 'open' })
+    const a = appliedThreads?.[threadId]
+    out.push({
+      threadId,
+      comment: content,
+      status: t.resolved ? 'resolved' : 'open',
+      ...(a?.docPath && a?.highlightText && { docPath: a.docPath, highlightText: a.highlightText }),
+    })
   }
   for (const [threadId, a] of Object.entries(appliedThreads || {}))
   {
     if (Object.hasOwn(threads || {}, threadId) || !isTutorComment(a?.comment)) continue
-    out.push({ threadId, comment: a.comment, status: 'deleted' })
+    out.push({
+      threadId,
+      comment: a.comment,
+      status: 'deleted',
+      ...(a.docPath && a.highlightText && { docPath: a.docPath, highlightText: a.highlightText }),
+    })
   }
   return out
 }
