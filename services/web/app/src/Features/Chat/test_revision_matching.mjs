@@ -171,6 +171,16 @@ check('same text at a different location stays new', () => {
   assert.equal(same.comments[0].revisionLabel, 'still_open')
 })
 
+check('severity-only prefix threads are prior threads', () => {
+  const got = buildPriorThreads({ t1: { messages: [{ content: '[critical] This opening is too vague.' }] } }, {})
+  assert.equal(got.length, 1)
+  assert.equal(comparisonKey('[critical] This opening is too vague.'), 'this opening is too vague.')
+  const out = labelComments(
+    [mk('[critical] [Clarity] This opening is too vague.')], got
+  )
+  assert.equal(out.comments[0].revisionLabel, 'still_open')
+})
+
 check('buildPriorThreads', () => {
   assert.deepEqual(
     buildPriorThreads({ t1: { messages: [{ content: '[warning] [Clarity] a b c' }] } }, {}),

@@ -15,7 +15,7 @@ export const REVISION_MATCH_THRESHOLD = 0.4
 // matched on text alone, which needs a much higher bar than the located case.
 export const UNLOCATED_MATCH_THRESHOLD = 0.7
 
-const PREFIX_RE = /^(\[AI Tutor\]\s*)?\[(critical|warning|suggestion)\]\s*\[[^\]]*\]\s*/i
+const PREFIX_RE = /^(\[AI Tutor\]\s*)?\[(critical|warning|suggestion)\]\s*(\[[^\]]*\]\s*)?/i
 const AGENT_TAG_RE = /^(?:\[AI Tutor\]\s*)?\[(?:critical|warning|suggestion)\]\s*\[([^\]]*)\]/
 const BAD_IDS = new Set(['__proto__', 'constructor', 'prototype'])
 const APPLIED_FILE = 'applied_threads.json'
@@ -121,8 +121,8 @@ export function labelComments(comments, priorThreads)
 
 function isTutorComment(text)
 {
-  const m = typeof text === 'string' && text.match(AGENT_TAG_RE)
-  return Boolean(m) && m[1] !== 'Reference Verification'
+  if (typeof text !== 'string' || !AI_TUTOR_THREAD_RE.test(text)) return false
+  return text.match(AGENT_TAG_RE)?.[1] !== 'Reference Verification'
 }
 
 export function buildPriorThreads(threads, appliedThreads)
