@@ -16,6 +16,12 @@ import { z } from 'zod'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  normalizeWhitespace,
+  diceCoefficient,
+  labelComments,
+  saveReviewRun,
+} from './AiTutorRevisionMatcher.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SKILLS_DIR = path.join(__dirname, 'ai-tutor-skills')
@@ -223,14 +229,6 @@ function repairJsonEscapedLatex(text)
 const FUZZY_THRESHOLD = Number.isFinite(FUZZY_THRESHOLD_ENV) ? FUZZY_THRESHOLD_ENV : FUZZY_THRESHOLD_DEFAULT
 
 /**
- * Normalize whitespace: collapse runs of whitespace into a single space, trim.
- */
-function normalizeWhitespace(str)
-{
-  return str.replace(/\s+/g, ' ').trim()
-}
-
-/**
  * Build a whitespace-normalized version of a string together with a
  * position map (normalizedIndex → originalIndex) so we can translate
  * match positions back to the original text.
@@ -269,38 +267,6 @@ function normalizeWithPosMap(str)
   }
 
   return { text: normalized, posMap }
-}
-
-/**
- * Compute Dice coefficient (bigram similarity) between two strings.
- * Returns a value between 0.0 and 1.0.
- */
-function diceCoefficient(a, b)
-{
-  if (a === b) return 1.0
-  if (a.length < 2 || b.length < 2) return 0.0
-
-  const bigramsA = new Map()
-  for (let i = 0; i < a.length - 1; i++)
-  {
-    const bg = a.slice(i, i + 2)
-    bigramsA.set(bg, (bigramsA.get(bg) || 0) + 1)
-  }
-
-  const bigramsB = new Map()
-  for (let i = 0; i < b.length - 1; i++)
-  {
-    const bg = b.slice(i, i + 2)
-    bigramsB.set(bg, (bigramsB.get(bg) || 0) + 1)
-  }
-
-  let intersection = 0
-  for (const [bg, countA] of bigramsA)
-  {
-    intersection += Math.min(countA, bigramsB.get(bg) || 0)
-  }
-
-  return (2.0 * intersection) / ((a.length - 1) + (b.length - 1))
 }
 
 /**
@@ -2136,6 +2102,7 @@ export function mapCommentsToDocuments(
  * @param {string} opts.cacheDir - path to the project's cache directory
  * @param {object} opts.docContentMap - { normalizedPath: contentString }
  * @param {string} opts.rootDocPath - normalized root doc path
+ * @param {Array} [opts.priorThreads] - threads from earlier reviews, used to label comments
  * @returns {object} { comments, classification, summary, failedAgents }
  */
 export async function runFullReview({
@@ -2146,6 +2113,7 @@ export async function runFullReview({
   docContentMap,
   rootDocPath,
   roleModelTexts = [],
+  priorThreads = [],
 })
 {
   const apiKey = process.env.OPENAI_API_KEY
@@ -2516,9 +2484,11 @@ export async function runFullReview({
     }
   }
 
+  const labelled = labelComments(mappedComments, priorThreads)
+
   // Group by document
   const commentsByDoc = {}
-  for (const c of mappedComments)
+  for (const c of labelled.comments)
   {
     if (!commentsByDoc[c.docPath]) commentsByDoc[c.docPath] = []
     commentsByDoc[c.docPath].push(c)
@@ -2527,7 +2497,7 @@ export async function runFullReview({
   // Build summary
   const byCat = {}
   const bySev = {}
-  for (const c of mappedComments)
+  for (const c of labelled.comments)
   {
     byCat[c.category] = (byCat[c.category] || 0) + 1
     bySev[c.severity] = (bySev[c.severity] || 0) + 1
@@ -2543,10 +2513,12 @@ export async function runFullReview({
     },
     commentsByDoc,
     summary: {
-      total: mappedComments.length,
+      total: labelled.comments.length,
       byCategory: byCat,
       bySeverity: bySev,
+      revision: labelled.counts,
     },
+    fixedThreadIds: labelled.fixedThreadIds,
     failedAgents,
     roleModelPapers: roleModelTexts.length > 0 ? roleModelTexts.map(rm => rm.name) : undefined,
   }
@@ -2555,6 +2527,8 @@ export async function runFullReview({
   const reviewPath = path.join(cacheDir, 'review_comments.json')
   fs.writeFileSync(reviewPath, JSON.stringify(reviewResult, null, 2))
   console.log(`[AI Tutor] Review cached to ${reviewPath}`)
+  const runPath = saveReviewRun(cacheDir, reviewResult)
+  console.log(`[AI Tutor] Review run saved to ${runPath}`)
 
   const overallElapsed = ((Date.now() - overallStart) / 1000).toFixed(1)
   console.log('='.repeat(80))
@@ -2562,6 +2536,7 @@ export async function runFullReview({
   console.log(`[AI Tutor]   Model: ${model}`)
   console.log(`[AI Tutor]   Paper type: ${reviewResult.classification.paperType}`)
   console.log(`[AI Tutor]   Total comments: ${reviewResult.summary.total}`)
+  console.log(`[AI Tutor]   Revision: ${JSON.stringify(reviewResult.summary.revision)}`)
   console.log(`[AI Tutor]   By category: ${JSON.stringify(reviewResult.summary.byCategory)}`)
   console.log(`[AI Tutor]   By severity: ${JSON.stringify(reviewResult.summary.bySeverity)}`)
   console.log(`[AI Tutor]   By document: ${Object.entries(commentsByDoc).map(([d, c]) => `${d}(${c.length})`).join(', ')}`)
